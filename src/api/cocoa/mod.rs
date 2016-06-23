@@ -154,7 +154,7 @@ impl WindowDelegate {
         let mut state = Box::new(state);
         let state_ptr: *mut DelegateState = &mut *state;
         unsafe {
-            let delegate = IdRef::new(msg_send![WindowDelegate::class(), new]);
+            let delegate = IdRef::new(msg_send![WindowDelegate::class(), new], "delegate");
 
             (&mut **delegate).set_ivar("glutinState", state_ptr as *mut ::std::os::raw::c_void);
             let _: () = msg_send![*state.window, setDelegate:*delegate];
@@ -167,8 +167,10 @@ impl WindowDelegate {
 impl Drop for WindowDelegate {
     fn drop(&mut self) {
         unsafe {
+            println!("drop: WindowDelegate ... ");
             // Nil the window's delegate so it doesn't still reference us
             let _: () = msg_send![*self.state.window, setDelegate:nil];
+            println!("drop finished");
         }
     }
 }
@@ -379,7 +381,7 @@ impl Window {
                     let matching_screen = {
                         let screens = appkit::NSScreen::screens(nil);
                         let count: NSUInteger = msg_send![screens, count];
-                        let key = IdRef::new(NSString::alloc(nil).init_str("NSScreenNumber"));
+                        let key = IdRef::new(NSString::alloc(nil).init_str("NSScreenNumber"), "key");
                         let mut matching_screen: Option<id> = None;
                         for i in 0..count {
                             let screen = msg_send![screens, objectAtIndex:i as NSUInteger];
@@ -432,9 +434,9 @@ impl Window {
                 masks,
                 appkit::NSBackingStoreBuffered,
                 NO,
-            ));
+            ), "window");
             window.non_nil().map(|window| {
-                let title = IdRef::new(NSString::alloc(nil).init_str(&attrs.title));
+                let title = IdRef::new(NSString::alloc(nil).init_str(&attrs.title), "title");
                 window.setTitle_(*title);
                 window.setAcceptsMouseMovedEvents_(YES);
 
@@ -456,7 +458,7 @@ impl Window {
 
     fn create_view(window: id) -> Option<IdRef> {
         unsafe {
-            let view = IdRef::new(NSView::alloc(nil).init());
+            let view = IdRef::new(NSView::alloc(nil).init(), "view");
             view.non_nil().map(|view| {
                 view.setWantsBestResolutionOpenGLSurface_(YES);
                 window.setContentView_(*view);
@@ -470,12 +472,12 @@ impl Window {
     {
         let attributes = try!(helpers::build_nsattributes(pf_reqs, opengl));
         unsafe {
-            let pixelformat = IdRef::new(NSOpenGLPixelFormat::alloc(nil).initWithAttributes_(&attributes));
+            let pixelformat = IdRef::new(NSOpenGLPixelFormat::alloc(nil).initWithAttributes_(&attributes), "pixel_format");
 
             if let Some(pixelformat) = pixelformat.non_nil() {
 
                 // TODO: Add context sharing
-                let context = IdRef::new(NSOpenGLContext::alloc(nil).initWithFormat_shareContext_(*pixelformat, nil));
+                let context = IdRef::new(NSOpenGLContext::alloc(nil).initWithFormat_shareContext_(*pixelformat, nil), "context");
 
                 if let Some(cxt) = context.non_nil() {
                     let pf = {
@@ -526,7 +528,7 @@ impl Window {
 
     pub fn set_title(&self, title: &str) {
         unsafe {
-            let title = IdRef::new(NSString::alloc(nil).init_str(title));
+            let title = IdRef::new(NSString::alloc(nil).init_str(title), "title");
             self.window.setTitle_(*title);
         }
     }
@@ -776,19 +778,20 @@ impl GlContext for Window {
     }
 }
 
-struct IdRef(id);
+struct IdRef(id, &'static str);
 
 impl IdRef {
-    fn new(i: id) -> IdRef {
-        IdRef(i)
+    fn new(i: id, name: &'static str) -> IdRef {
+        println!("new: {:?} {:?}", name, &i);
+        IdRef(i, name)
     }
 
     #[allow(dead_code)]
-    fn retain(i: id) -> IdRef {
+    fn retain(i: id, name: &'static str) -> IdRef {
         if i != nil {
             let _: id = unsafe { msg_send![i, retain] };
         }
-        IdRef(i)
+        IdRef(i, name)
     }
 
     fn non_nil(self) -> Option<IdRef> {
@@ -799,7 +802,9 @@ impl IdRef {
 impl Drop for IdRef {
     fn drop(&mut self) {
         if self.0 != nil {
-            let _: () = unsafe { msg_send![self.0, autorelease] };
+            print!("drop: {:?} {:?} ... ", &self.1, &self.0);
+            let _: () = unsafe { msg_send![self.0, release] };
+            println!("drop finished");
         }
     }
 }
@@ -814,9 +819,12 @@ impl Deref for IdRef {
 impl Clone for IdRef {
     fn clone(&self) -> IdRef {
         if self.0 != nil {
+            println!("clone: {:?} {:?}", &self.1, &self.0);
             let _: id = unsafe { msg_send![self.0, retain] };
+        } else {
+            println!("{:?} {:?} was nil when cloning!", &self.1, &self.0);
         }
-        IdRef(self.0)
+        IdRef(self.0, self.1)
     }
 }
 
